@@ -1,0 +1,24 @@
+# Build artifacts
+/tasktracker
+*.exe
+*.test
+
+# Test/coverage output
+*.out
+coverage.*
+
+# SQLite databases (default/fallback DB path, local dev data)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+internal/
+.claude/
+
+# OS
+.DS_Store
