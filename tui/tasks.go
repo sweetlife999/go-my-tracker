@@ -125,26 +125,6 @@ func (m *Model) promptAddTask() {
 	m.input.Focus()
 }
 
-func (m *Model) promptAddDependency() {
-	if m.detailTask == nil {
-		return
-	}
-	task := m.detailTask
-	m.pendingInput = &inputRequest{
-		prompt: fmt.Sprintf("Block %q by task ID:", task.Title),
-		onSubmit: func(m *Model, value string) {
-			if err := m.store.AddDependency(ctx(), task.ID, core.TaskID(value)); err != nil {
-				m.err = err
-				return
-			}
-			m.err = nil
-			m.refreshTasks()
-		},
-	}
-	m.input.Placeholder = "e.g. 3159557c"
-	m.input.Focus()
-}
-
 func (m *Model) renderTaskDetail() string {
 	t := m.detailTask
 	if t == nil {
@@ -152,7 +132,6 @@ func (m *Model) renderTaskDetail() string {
 	}
 	var b strings.Builder
 	b.WriteString(detailLabelStyle.Render(t.Title) + "\n\n")
-	fmt.Fprintf(&b, "%s %s\n", detailLabelStyle.Render("ID:"), t.ID)
 	fmt.Fprintf(&b, "%s %v\n", detailLabelStyle.Render("Done:"), t.Done)
 
 	notes := t.Notes
@@ -164,12 +143,23 @@ func (m *Model) renderTaskDetail() string {
 	if len(t.BlockedBy) == 0 {
 		fmt.Fprintf(&b, "%s (none)\n", detailLabelStyle.Render("Blocked by:"))
 	} else {
-		ids := make([]string, len(t.BlockedBy))
+		titles := make([]string, len(t.BlockedBy))
 		for i, id := range t.BlockedBy {
-			ids[i] = string(id)
+			titles[i] = m.taskTitle(id)
 		}
-		fmt.Fprintf(&b, "%s %s\n", detailLabelStyle.Render("Blocked by:"), strings.Join(ids, ", "))
+		fmt.Fprintf(&b, "%s %s\n", detailLabelStyle.Render("Blocked by:"), strings.Join(titles, ", "))
 	}
 
 	return b.String()
+}
+
+// taskTitle resolves a TaskID to its title using the already-loaded task
+// list, falling back to the raw ID if the task can't be found there.
+func (m *Model) taskTitle(id core.TaskID) string {
+	for _, item := range m.taskList.Items() {
+		if ti, ok := item.(taskItem); ok && ti.t.ID == id {
+			return ti.t.Title
+		}
+	}
+	return string(id)
 }

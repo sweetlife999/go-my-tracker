@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -54,6 +56,10 @@ type Model struct {
 	showDetail bool
 	detailTask *core.Task
 
+	showBlockerPicker bool
+	blockerTarget     *core.Task
+	blockerList       list.Model
+
 	input        textinput.Model
 	pendingInput *inputRequest
 
@@ -77,6 +83,7 @@ func NewModel(store *core.Store) *Model {
 		habitList: newStyledList("Habits"),
 		input:     ti,
 	}
+	m.blockerList = newStyledList("")
 
 	m.refreshTasks()
 	m.refreshHabits()
@@ -101,6 +108,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.pendingInput != nil {
 			return m.updatePendingInput(msg)
+		}
+		if m.showBlockerPicker {
+			return m.updateBlockerPicker(msg)
 		}
 		if m.showDetail {
 			return m.updateDetail(msg)
@@ -153,10 +163,79 @@ func (m *Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.refreshTasks()
 		return m, nil
 	case "b":
-		m.promptAddDependency()
+		m.openBlockerPicker()
 		return m, nil
 	}
 	return m, nil
+}
+
+// updateBlockerPicker routes keys to the blocker-search list. Typing
+// filters candidate tasks by title (bubbles/list's fuzzy filter); Enter
+// while not actively filtering confirms the highlighted task as the new
+// blocker; Esc closes the picker once any active filter has been cleared.
+func (m *Model) updateBlockerPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		if m.blockerList.FilterState() == list.Unfiltered {
+			m.showBlockerPicker = false
+			m.blockerTarget = nil
+			return m, nil
+		}
+	case "enter":
+		if m.blockerList.FilterState() != list.Filtering {
+			if item, ok := m.blockerList.SelectedItem().(taskItem); ok && m.blockerTarget != nil {
+				if err := m.store.AddDependency(ctx(), m.blockerTarget.ID, item.t.ID); err != nil {
+					m.err = fmt.Errorf("can't block %q by %q: it would create a dependency cycle", m.blockerTarget.Title, item.t.Title)
+				} else {
+					m.err = nil
+					m.refreshTasks()
+					m.showBlockerPicker = false
+					m.blockerTarget = nil
+				}
+			}
+			return m, nil
+		}
+	}
+	var cmd tea.Cmd
+	m.blockerList, cmd = m.blockerList.Update(msg)
+	return m, cmd
+}
+
+// openBlockerPicker opens a searchable list of every other task, so the
+// user can find a blocker by name instead of typing its raw ID.
+func (m *Model) openBlockerPicker() {
+	if m.detailTask == nil {
+		return
+	}
+	target := m.detailTask
+
+	tasks, err := m.store.ListTasks(ctx())
+	if err != nil {
+		m.err = err
+		return
+	}
+	var candidates []*core.Task
+	for _, t := range tasks {
+		if t.ID != target.ID {
+			candidates = append(candidates, t)
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].CreatedAt.Before(candidates[j].CreatedAt) })
+
+	m.blockerTarget = target
+	m.blockerList = newStyledList(fmt.Sprintf("Block %q by… (type to search)", target.Title))
+	m.blockerList.SetItems(toTaskItems(candidates))
+
+	listHeight := m.height - 6
+	if listHeight < 3 {
+		listHeight = 3
+	}
+	m.blockerList.SetSize(m.width, listHeight)
+	m.blockerList.SetFilterState(list.Filtering)
+
+	m.showBlockerPicker = true
 }
 
 func (m *Model) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -226,6 +305,8 @@ func (m *Model) View() string {
 	case m.pendingInput != nil:
 		b.WriteString(promptStyle.Render(m.pendingInput.prompt) + "\n")
 		b.WriteString(m.input.View() + "\n")
+	case m.showBlockerPicker:
+		b.WriteString(m.blockerList.View())
 	case m.showDetail:
 		b.WriteString(m.renderTaskDetail())
 	default:
@@ -260,6 +341,8 @@ func (m *Model) helpText() string {
 	switch {
 	case m.pendingInput != nil:
 		return "enter: submit  esc: cancel"
+	case m.showBlockerPicker:
+		return "type to search by title  enter: confirm  esc: cancel"
 	case m.showDetail:
 		return "d: toggle done  b: add dependency (blocked by)  esc: back  q: quit"
 	case m.screen == screenHabits:

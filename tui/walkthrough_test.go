@@ -22,6 +22,17 @@ func key(m *Model, s string) {
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
 }
 
+// pickBlockerByName simulates searching the blocker picker by title (the
+// thing this test exists to cover): type the name to filter, Enter to
+// apply the filter, Enter again to confirm the highlighted match.
+func pickBlockerByName(m *Model, name string) {
+	for _, r := range name {
+		m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // apply filter
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm selection
+}
+
 func TestWalkthrough_TasksDependencyAndHabit(t *testing.T) {
 	store, err := core.Open(":memory:")
 	if err != nil {
@@ -65,12 +76,15 @@ func TestWalkthrough_TasksDependencyAndHabit(t *testing.T) {
 		t.Fatalf("expected detail view open on B, got showDetail=%v task=%v", m.showDetail, m.detailTask)
 	}
 	key(m, "b")
-	if m.pendingInput == nil {
-		t.Fatal("expected 'b' to open the add-dependency prompt")
+	if !m.showBlockerPicker {
+		t.Fatal("expected 'b' to open the blocker picker")
 	}
-	typeAndEnter(m, string(a.ID))
+	pickBlockerByName(m, a.Title)
 	if m.err != nil {
-		t.Fatalf("unexpected error after adding dependency: %v", m.err)
+		t.Fatalf("unexpected error after adding dependency by searching for %q: %v", a.Title, m.err)
+	}
+	if m.showBlockerPicker {
+		t.Fatal("expected picker to close after a successful selection")
 	}
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back out of detail
@@ -106,16 +120,28 @@ func TestWalkthrough_TasksDependencyAndHabit(t *testing.T) {
 	m.taskList.Select(0)
 	key(m, "enter")
 	key(m, "b")
-	typeAndEnter(m, string(b.ID))
+	pickBlockerByName(m, b.Title)
 	if m.err == nil {
 		t.Fatal("expected cycle error to be surfaced in m.err")
 	}
 	if !strings.Contains(m.err.Error(), "cycle") {
 		t.Fatalf("expected cycle error, got: %v", m.err)
 	}
+	// The picker should stay open on error so the user can try another task.
+	if !m.showBlockerPicker {
+		t.Fatal("expected picker to remain open after a rejected (cyclic) selection")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // clear the picker's filter
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // close the picker
+	if m.showBlockerPicker {
+		t.Fatal("expected picker to be closed after clearing filter then esc again")
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back out of detail
+	if m.showDetail {
+		t.Fatal("expected detail view to be closed")
+	}
 
 	// --- Habit walkthrough ---
-	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m.screen = screenHabits
 	key(m, "a")
 	typeAndEnter(m, "Meditate")
