@@ -13,8 +13,71 @@ import (
 
 func ctx() context.Context { return context.Background() }
 
-// taskItem adapts *core.Task to bubbles/list.Item.
-type taskItem struct{ t *core.Task }
+// taskStatus is the Done > Ready > Blocked classification shown on a task
+// row, mirroring mobile/status.go. It is always derived from
+// core.Store.ReadyTasks rather than recomputed from BlockedBy edges, so a
+// task whose blockers are all done reads as ready, not blocked.
+type taskStatus int
+
+const (
+	statusBlocked taskStatus = iota
+	statusReady
+	statusDone
+)
+
+// snapshot is the derived view of the whole task set that row rendering
+// needs: which tasks core considers ready, and how many of each task's
+// blockers are still open.
+type snapshot struct {
+	ready        map[core.TaskID]bool
+	openBlockers map[core.TaskID]int
+}
+
+// newSnapshot derives readiness and open-blocker counts for tasks. ready is
+// the set of IDs core.Store.ReadyTasks returned.
+func newSnapshot(tasks []*core.Task, ready []*core.Task) snapshot {
+	s := snapshot{
+		ready:        make(map[core.TaskID]bool, len(ready)),
+		openBlockers: make(map[core.TaskID]int, len(tasks)),
+	}
+	for _, t := range ready {
+		s.ready[t.ID] = true
+	}
+
+	done := make(map[core.TaskID]bool, len(tasks))
+	for _, t := range tasks {
+		done[t.ID] = t.Done
+	}
+	for _, t := range tasks {
+		open := 0
+		for _, id := range t.BlockedBy {
+			if !done[id] {
+				open++
+			}
+		}
+		s.openBlockers[t.ID] = open
+	}
+	return s
+}
+
+func (s snapshot) statusOf(t *core.Task) taskStatus {
+	switch {
+	case t.Done:
+		return statusDone
+	case s.ready[t.ID]:
+		return statusReady
+	default:
+		return statusBlocked
+	}
+}
+
+// taskItem adapts *core.Task to bubbles/list.Item, carrying the derived
+// status/open-blocker count alongside it so Description never has to guess.
+type taskItem struct {
+	t            *core.Task
+	status       taskStatus
+	openBlockers int
+}
 
 func (i taskItem) Title() string {
 	status := " "
@@ -25,10 +88,17 @@ func (i taskItem) Title() string {
 }
 
 func (i taskItem) Description() string {
-	if len(i.t.BlockedBy) == 0 {
-		return "no blockers"
+	switch i.status {
+	case statusDone:
+		return "done"
+	case statusReady:
+		if len(i.t.BlockedBy) == 0 {
+			return "ready — no blockers"
+		}
+		return fmt.Sprintf("ready — all %d blocker(s) done", len(i.t.BlockedBy))
+	default:
+		return fmt.Sprintf("blocked by %d unfinished task(s)", i.openBlockers)
 	}
-	return fmt.Sprintf("blocked by %d task(s)", len(i.t.BlockedBy))
 }
 
 func (i taskItem) FilterValue() string { return i.t.Title }
@@ -41,16 +111,18 @@ func (m *Model) refreshTasks() {
 		m.err = err
 		return
 	}
-	sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt.Before(tasks[j].CreatedAt) })
-	m.taskList.SetItems(toTaskItems(tasks))
-
 	ready, err := m.store.ReadyTasks(ctx())
 	if err != nil {
 		m.err = err
 		return
 	}
+	m.snapshot = newSnapshot(tasks, ready)
+
+	sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt.Before(tasks[j].CreatedAt) })
+	m.taskList.SetItems(m.toTaskItems(tasks))
+
 	sort.Slice(ready, func(i, j int) bool { return ready[i].CreatedAt.Before(ready[j].CreatedAt) })
-	m.readyList.SetItems(toTaskItems(ready))
+	m.readyList.SetItems(m.toTaskItems(ready))
 
 	// Keep an open detail view in sync with the underlying task's new state.
 	if m.detailTask != nil {
@@ -62,10 +134,16 @@ func (m *Model) refreshTasks() {
 	}
 }
 
-func toTaskItems(tasks []*core.Task) []list.Item {
+// toTaskItems wraps tasks as list items, stamping each with the status
+// derived from the model's current snapshot.
+func (m *Model) toTaskItems(tasks []*core.Task) []list.Item {
 	items := make([]list.Item, len(tasks))
 	for i, t := range tasks {
-		items[i] = taskItem{t}
+		items[i] = taskItem{
+			t:            t,
+			status:       m.snapshot.statusOf(t),
+			openBlockers: m.snapshot.openBlockers[t.ID],
+		}
 	}
 	return items
 }

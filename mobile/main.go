@@ -20,6 +20,10 @@ import (
 type application struct {
 	store  *core.Store
 	sheets *sheetHost
+	errBar *errorBanner
+
+	// root is the window content: the error banner above the tabs/sheets.
+	root fyne.CanvasObject
 
 	tasks  *tasksScreen
 	ready  *readyScreen
@@ -29,22 +33,25 @@ type application struct {
 }
 
 func newApplication(store *core.Store) *application {
-	a := &application{store: store}
+	a := &application{store: store, errBar: newErrorBanner()}
 
 	a.tasks = newTasksScreen(store,
 		func(t *core.Task) { a.openDetail(t.ID) },
 		func() { a.openAddTaskSheet() },
 		a.refreshAll,
+		a.reportError,
 	)
 	a.ready = newReadyScreen(store,
 		func(t *core.Task) { a.openDetail(t.ID) },
 		a.refreshAll,
+		a.reportError,
 	)
 	a.hub = newHubScreen(store)
 	a.graph = newGraphScreen(store)
 	a.habits = newHabitsScreen(store,
 		func() { a.openAddHabitSheet() },
 		a.refreshAll,
+		a.reportError,
 	)
 
 	tabs := container.NewAppTabs(
@@ -57,8 +64,16 @@ func newApplication(store *core.Store) *application {
 	tabs.SetTabLocation(container.TabLocationBottom)
 
 	a.sheets = newSheetHost(tabs)
+	a.root = container.NewBorder(a.errBar.root, nil, nil, nil, a.sheets.root)
 	a.refreshAll()
 	return a
+}
+
+// reportError surfaces a failed store operation to the user. Every read and
+// write path routes through here — silently discarding the error would leave
+// the UI showing an edit that was never persisted.
+func (a *application) reportError(err error) {
+	a.errBar.Show(err)
 }
 
 // refreshAll reloads every screen from the store. Called after any
@@ -77,13 +92,22 @@ func (a *application) openDetail(id core.TaskID) {
 	ctx := context.Background()
 	t, err := a.store.GetTask(ctx, id)
 	if err != nil {
+		a.reportError(err)
 		return
 	}
-	allTasks, _ := a.store.ListTasks(ctx)
-	readyTasks, _ := a.store.ReadyTasks(ctx)
+	allTasks, err := a.store.ListTasks(ctx)
+	if err != nil {
+		a.reportError(err)
+		return
+	}
+	readyTasks, err := a.store.ReadyTasks(ctx)
+	if err != nil {
+		a.reportError(err)
+		return
+	}
 	status := deriveStatus(t, readySet(readyTasks))
 
-	content := newTaskDetail(a.store, t, allTasks, status,
+	detail := newTaskDetail(a.store, t, allTasks, status,
 		func(target *core.Task) { a.openBlockerPicker(target.ID) },
 		func(mutated *core.Task) {
 			a.refreshAll()
@@ -93,18 +117,21 @@ func (a *application) openDetail(id core.TaskID) {
 			a.refreshAll()
 			a.sheets.Hide()
 		},
+		a.reportError,
 	)
-	a.sheets.Show(newModalPanel(content))
+	a.sheets.Show(newModalPanel(detail.root))
 }
 
 func (a *application) openBlockerPicker(id core.TaskID) {
 	target, err := a.store.GetTask(context.Background(), id)
 	if err != nil {
+		a.reportError(err)
 		return
 	}
 	content := newBlockerPicker(a.store, target,
 		func() { a.openDetail(id) },
 		func() { a.openDetail(id) },
+		a.reportError,
 	)
 	a.sheets.Show(newModalPanel(content))
 }
@@ -113,9 +140,11 @@ func (a *application) openAddTaskSheet() {
 	content := newAddSheet("New task", "Write report", func(value string) {
 		t, err := core.NewTask(core.TaskID(core.NewID()), value)
 		if err != nil {
+			a.reportError(err)
 			return
 		}
 		if err := a.store.SaveTask(context.Background(), t); err != nil {
+			a.reportError(err)
 			return
 		}
 		a.sheets.Hide()
@@ -128,9 +157,11 @@ func (a *application) openAddHabitSheet() {
 	content := newAddSheet("New habit", "Meditate", func(value string) {
 		h, err := core.NewHabit(core.HabitID(core.NewID()), value, core.Daily, 0)
 		if err != nil {
+			a.reportError(err)
 			return
 		}
 		if err := a.store.SaveHabit(context.Background(), h); err != nil {
+			a.reportError(err)
 			return
 		}
 		a.sheets.Hide()
@@ -153,7 +184,7 @@ func main() {
 	appModel := newApplication(store)
 
 	w := fyneApp.NewWindow("Task Tracker")
-	w.SetContent(appModel.sheets.root)
+	w.SetContent(appModel.root)
 	w.Resize(fyne.NewSize(400, 800))
 	w.ShowAndRun()
 }

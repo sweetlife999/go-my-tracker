@@ -23,7 +23,8 @@ type taskListView struct {
 	load  func(ctx context.Context) ([]*core.Task, error)
 
 	onOpenDetail func(*core.Task)
-	onChanged    func() // notify the app so sibling screens (Hub, Graph, Ready) refresh
+	onChanged    func()      // notify the app so sibling screens (Hub, Graph, Ready) refresh
+	onError      func(error) // surface failed store reads/writes
 
 	query string
 
@@ -36,12 +37,13 @@ type taskListView struct {
 	stack      *fyne.Container
 }
 
-func newTaskListView(store *core.Store, load func(ctx context.Context) ([]*core.Task, error), emptyMessage string, onOpenDetail func(*core.Task), onChanged func()) *taskListView {
+func newTaskListView(store *core.Store, load func(ctx context.Context) ([]*core.Task, error), emptyMessage string, onOpenDetail func(*core.Task), onChanged func(), onError func(error)) *taskListView {
 	v := &taskListView{
 		store:        store,
 		load:         load,
 		onOpenDetail: onOpenDetail,
 		onChanged:    onChanged,
+		onError:      onError,
 	}
 
 	v.emptyLabel = widget.NewLabel(emptyMessage)
@@ -82,10 +84,20 @@ func (v *taskListView) toggleDone(t *core.Task) {
 	} else {
 		t.MarkDone()
 	}
-	_ = v.store.SaveTask(context.Background(), t)
+	if err := v.store.SaveTask(context.Background(), t); err != nil {
+		v.reportError(err)
+		return
+	}
 	v.Refresh()
 	if v.onChanged != nil {
 		v.onChanged()
+	}
+}
+
+// reportError hands a store failure to the app, which shows it to the user.
+func (v *taskListView) reportError(err error) {
+	if err != nil && v.onError != nil {
+		v.onError(err)
 	}
 }
 
@@ -99,12 +111,15 @@ func (v *taskListView) SetQuery(q string) {
 func (v *taskListView) Refresh() {
 	tasks, err := v.load(context.Background())
 	if err != nil {
+		v.reportError(err)
 		tasks = nil
 	}
 	sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt.Before(tasks[j].CreatedAt) })
 	v.all = tasks
 
-	if readyTasks, err := v.store.ReadyTasks(context.Background()); err == nil {
+	if readyTasks, err := v.store.ReadyTasks(context.Background()); err != nil {
+		v.reportError(err)
+	} else {
 		v.ready = readySet(readyTasks)
 	}
 

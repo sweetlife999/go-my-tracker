@@ -15,9 +15,9 @@ type readyScreen struct {
 	root fyne.CanvasObject
 }
 
-func newReadyScreen(store *core.Store, onOpenDetail func(*core.Task), onChanged func()) *readyScreen {
+func newReadyScreen(store *core.Store, onOpenDetail func(*core.Task), onChanged func(), onError func(error)) *readyScreen {
 	s := &readyScreen{}
-	s.view = newTaskListView(store, store.ReadyTasks, "Nothing is unblocked right now.", onOpenDetail, onChanged)
+	s.view = newTaskListView(store, store.ReadyTasks, "Nothing is unblocked right now.", onOpenDetail, onChanged, onError)
 
 	caption := widget.NewLabel("Tasks with no open blockers — what you can actually work on right now.")
 	caption.Wrapping = fyne.TextWrapWord

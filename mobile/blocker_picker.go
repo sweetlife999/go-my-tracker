@@ -18,12 +18,14 @@ import (
 // task not already a blocker, tapping one calls the existing
 // store.AddDependency (a cycle rejection is shown inline, same message
 // style as the TUI). onDone is called after a successful add; onBack
-// returns to the detail sheet without picking anything.
-func newBlockerPicker(store *core.Store, target *core.Task, onDone func(), onBack func()) fyne.CanvasObject {
+// returns to the detail sheet without picking anything; onError receives a
+// failed store read.
+func newBlockerPicker(store *core.Store, target *core.Task, onDone func(), onBack func(), onError func(error)) fyne.CanvasObject {
 	ctx := context.Background()
 
 	all, err := store.ListTasks(ctx)
 	if err != nil {
+		onError(err)
 		all = nil
 	}
 	blockedSet := make(map[core.TaskID]bool, len(target.BlockedBy))

@@ -19,13 +19,14 @@ type habitsScreen struct {
 	habits []*core.Habit
 
 	onChanged func()
+	onError   func(error)
 
 	list *widget.List
 	root fyne.CanvasObject
 }
 
-func newHabitsScreen(store *core.Store, onAdd func(), onChanged func()) *habitsScreen {
-	s := &habitsScreen{store: store, onChanged: onChanged}
+func newHabitsScreen(store *core.Store, onAdd func(), onChanged func(), onError func(error)) *habitsScreen {
+	s := &habitsScreen{store: store, onChanged: onChanged, onError: onError}
 
 	s.list = widget.NewList(
 		func() int { return len(s.habits) },
@@ -48,6 +49,7 @@ func newHabitsScreen(store *core.Store, onAdd func(), onChanged func()) *habitsS
 
 func (s *habitsScreen) checkIn(h *core.Habit) {
 	if err := s.store.CheckInHabit(context.Background(), h.ID, time.Now()); err != nil {
+		s.reportError(err)
 		return
 	}
 	s.Refresh()
@@ -56,9 +58,17 @@ func (s *habitsScreen) checkIn(h *core.Habit) {
 	}
 }
 
+// reportError hands a store failure to the app, which shows it to the user.
+func (s *habitsScreen) reportError(err error) {
+	if err != nil && s.onError != nil {
+		s.onError(err)
+	}
+}
+
 func (s *habitsScreen) Refresh() {
 	habits, err := s.store.ListHabits(context.Background())
 	if err != nil {
+		s.reportError(err)
 		habits = nil
 	}
 	s.habits = habits

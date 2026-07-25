@@ -72,11 +72,13 @@ func (h *Habit) intervalDays() int {
 }
 
 // CheckIn records a completion at t. Multiple check-ins on the same
-// calendar day are deduplicated.
+// calendar day are deduplicated — compared by date, so a check-in recorded
+// under a different timezone offset than an earlier one on the same day is
+// still recognized as a duplicate.
 func (h *Habit) CheckIn(t time.Time) {
 	day := truncateToDay(t)
 	for _, existing := range h.CompletionLog {
-		if truncateToDay(existing).Equal(day) {
+		if dayNumber(existing) == dayNumber(day) {
 			return
 		}
 	}
@@ -116,11 +118,27 @@ func (h *Habit) Streak(asOf time.Time) int {
 	return streak
 }
 
+// dayLayout is how a completion day is persisted: a bare calendar date,
+// with no time and no timezone offset. A completion means "this day", not
+// "this instant", so anything more precise only invites offset bugs.
+const dayLayout = "2006-01-02"
+
 func truncateToDay(t time.Time) time.Time {
 	y, m, d := t.Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, t.Location())
 }
 
+// dayNumber maps a time to the number of whole calendar days since the
+// epoch, ignoring its clock time and zone.
+func dayNumber(t time.Time) int {
+	y, m, d := t.Date()
+	return int(time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Unix() / (60 * 60 * 24))
+}
+
+// daysBetween counts calendar days from earlier to later. It deliberately
+// compares dates rather than subtracting instants: a duration divided by 24h
+// under-counts across a spring-forward DST transition (23h reads as 0 days),
+// which would hide a broken streak.
 func daysBetween(earlier, later time.Time) int {
-	return int(later.Sub(earlier).Hours() / 24)
+	return dayNumber(later) - dayNumber(earlier)
 }

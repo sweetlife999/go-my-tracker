@@ -16,9 +16,9 @@ type tasksScreen struct {
 	root fyne.CanvasObject
 }
 
-func newTasksScreen(store *core.Store, onOpenDetail func(*core.Task), onAdd func(), onChanged func()) *tasksScreen {
+func newTasksScreen(store *core.Store, onOpenDetail func(*core.Task), onAdd func(), onChanged func(), onError func(error)) *tasksScreen {
 	s := &tasksScreen{}
-	s.view = newTaskListView(store, store.ListTasks, "No tasks yet — tap + to add one.", onOpenDetail, onChanged)
+	s.view = newTaskListView(store, store.ListTasks, "No tasks yet — tap + to add one.", onOpenDetail, onChanged, onError)
 
 	search := widget.NewEntry()
 	search.SetPlaceHolder("Search tasks")

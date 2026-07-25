@@ -53,6 +53,10 @@ type Model struct {
 	readyList list.Model
 	habitList list.Model
 
+	// snapshot holds the derived readiness/blocker view of the task set as
+	// of the last refreshTasks, used to label rows.
+	snapshot snapshot
+
 	showDetail bool
 	detailTask *core.Task
 
@@ -116,8 +120,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDetail(msg)
 		}
 		return m.updateBrowsing(msg)
+
+	default:
+		// Everything that isn't a keystroke — bubbles/list's asynchronous
+		// filter results (list.FilterMatchesMsg), cursor blinks — has to
+		// reach the component that asked for it. Dropping these means the
+		// filter never narrows the list at all.
+		if m.pendingInput != nil {
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+		}
+		if m.showBlockerPicker {
+			var cmd tea.Cmd
+			m.blockerList, cmd = m.blockerList.Update(msg)
+			return m, cmd
+		}
+		l := m.activeList()
+		var cmd tea.Cmd
+		*l, cmd = l.Update(msg)
+		return m, cmd
 	}
-	return m, nil
 }
 
 func (m *Model) updatePendingInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -226,7 +249,7 @@ func (m *Model) openBlockerPicker() {
 
 	m.blockerTarget = target
 	m.blockerList = newStyledList(fmt.Sprintf("Block %q by… (type to search)", target.Title))
-	m.blockerList.SetItems(toTaskItems(candidates))
+	m.blockerList.SetItems(m.toTaskItems(candidates))
 
 	listHeight := m.height - 6
 	if listHeight < 3 {
@@ -238,7 +261,32 @@ func (m *Model) openBlockerPicker() {
 	m.showBlockerPicker = true
 }
 
+// activeList returns the list backing the current screen. Every screen has
+// one, so this never returns nil.
+func (m *Model) activeList() *list.Model {
+	switch m.screen {
+	case screenReady:
+		return &m.readyList
+	case screenHabits:
+		return &m.habitList
+	default:
+		return &m.taskList
+	}
+}
+
 func (m *Model) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	l := m.activeList()
+
+	// While the list's filter input has focus every key belongs to it —
+	// otherwise the single-letter shortcuts below would swallow the search
+	// text (typing "quarterly" would quit, "audit" would open the add
+	// prompt). Same guard updateBlockerPicker uses.
+	if l.FilterState() == list.Filtering && msg.String() != "ctrl+c" {
+		var cmd tea.Cmd
+		*l, cmd = l.Update(msg)
+		return m, cmd
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -280,14 +328,7 @@ func (m *Model) updateBrowsing(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
-	switch m.screen {
-	case screenTasks:
-		m.taskList, cmd = m.taskList.Update(msg)
-	case screenReady:
-		m.readyList, cmd = m.readyList.Update(msg)
-	case screenHabits:
-		m.habitList, cmd = m.habitList.Update(msg)
-	}
+	*l, cmd = l.Update(msg)
 	return m, cmd
 }
 
@@ -345,9 +386,11 @@ func (m *Model) helpText() string {
 		return "type to search by title  enter: confirm  esc: cancel"
 	case m.showDetail:
 		return "d: toggle done  b: add dependency (blocked by)  esc: back  q: quit"
+	case m.activeList().FilterState() == list.Filtering:
+		return "type to search  enter: apply  esc: clear"
 	case m.screen == screenHabits:
-		return "tab: switch view  a: add habit  enter/c: check in  q: quit"
+		return "tab/shift+tab: switch view  /: search  a: add habit  enter/c: check in  q: quit"
 	default:
-		return "tab: switch view  a: add task  enter: detail  d: toggle done  q: quit"
+		return "tab/shift+tab: switch view  /: search  a: add task  enter: detail  d: toggle done  q: quit"
 	}
 }

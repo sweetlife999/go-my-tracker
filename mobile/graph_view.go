@@ -22,6 +22,26 @@ const (
 	graphPad   float32 = 16
 )
 
+// graphLabelRunes is how many characters of a task title fit in a node box.
+const graphLabelRunes = 16
+
+// truncateRunes shortens s to at most limit characters, appending an
+// ellipsis when it had to cut. It counts runes, not bytes: byte-slicing a
+// UTF-8 string splits multibyte characters and renders mojibake.
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	if limit <= 0 {
+		return ""
+	}
+	if limit == 1 {
+		return "…"
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
 type graphNode struct {
 	rect *canvas.Rectangle
 	text *canvas.Text
@@ -86,11 +106,7 @@ func (w *depGraphWidget) update(tasks []*core.Task) {
 			rect.StrokeWidth = 1.5
 			rect.CornerRadius = 8
 
-			label := t.Title
-			if len(label) > 16 {
-				label = label[:15] + "…"
-			}
-			text := canvas.NewText(label, colorWhite)
+			text := canvas.NewText(truncateRunes(t.Title, graphLabelRunes), colorWhite)
 			text.TextSize = 12
 
 			nodes = append(nodes, &graphNode{rect: rect, text: text, x: x, y: y})

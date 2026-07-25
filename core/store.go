@@ -259,9 +259,12 @@ func (s *Store) SaveHabit(ctx context.Context, h *Habit) error {
 }
 
 // CheckInHabit records a completion for the given day, deduplicating
-// same-day check-ins at the database level.
+// same-day check-ins at the database level. The stored key is a bare
+// calendar date (see dayLayout) — storing an offset-bearing timestamp would
+// make the same day recorded under two different timezone offsets two
+// distinct primary keys, and so double-count a day in the streak.
 func (s *Store) CheckInHabit(ctx context.Context, id HabitID, t time.Time) error {
-	day := truncateToDay(t).Format(time.RFC3339)
+	day := truncateToDay(t).Format(dayLayout)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO habit_completions (habit_id, completed_at) VALUES (?, ?)
 		ON CONFLICT(habit_id, completed_at) DO NOTHING
@@ -329,7 +332,7 @@ func (s *Store) ListHabits(ctx context.Context) ([]*Habit, error) {
 		if !ok {
 			continue
 		}
-		t, err := time.Parse(time.RFC3339, completedAt)
+		t, err := time.ParseInLocation(dayLayout, completedAt, time.Local)
 		if err != nil {
 			return nil, fmt.Errorf("core: parse completed_at for %q: %w", habitID, err)
 		}

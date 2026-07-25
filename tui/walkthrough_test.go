@@ -33,6 +33,19 @@ func pickBlockerByName(m *Model, name string) {
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // confirm selection
 }
 
+// descriptionOf returns the Tasks-tab row description for a task, i.e. the
+// ready/blocked/done line a user actually reads.
+func descriptionOf(t *testing.T, m *Model, id core.TaskID) string {
+	t.Helper()
+	for _, item := range m.taskList.Items() {
+		if ti, ok := item.(taskItem); ok && ti.t.ID == id {
+			return ti.Description()
+		}
+	}
+	t.Fatalf("task %q not present in the task list", id)
+	return ""
+}
+
 func TestWalkthrough_TasksDependencyAndHabit(t *testing.T) {
 	store, err := core.Open(":memory:")
 	if err != nil {
@@ -89,6 +102,11 @@ func TestWalkthrough_TasksDependencyAndHabit(t *testing.T) {
 
 	m.Update(tea.KeyMsg{Type: tea.KeyEsc}) // back out of detail
 
+	// B is genuinely blocked now, and the Tasks tab must say so.
+	if got := descriptionOf(t, m, b.ID); got != "blocked by 1 unfinished task(s)" {
+		t.Fatalf("B's description while blocked = %q", got)
+	}
+
 	// Ready view should now show only A.
 	m.screen = screenReady
 	m.refreshTasks()
@@ -113,6 +131,15 @@ func TestWalkthrough_TasksDependencyAndHabit(t *testing.T) {
 	}
 	if readyID := m.readyList.Items()[0].(taskItem).t.ID; readyID != b.ID {
 		t.Fatalf("expected B to be the only ready task now, got %v", readyID)
+	}
+
+	// B still has a BlockedBy edge, but its blocker is done — the row must
+	// read as ready, not "blocked by 1 task(s)".
+	if got := descriptionOf(t, m, b.ID); got != "ready — all 1 blocker(s) done" {
+		t.Fatalf("B's description once its blocker is done = %q", got)
+	}
+	if got := descriptionOf(t, m, a.ID); got != "done" {
+		t.Fatalf("A's description once completed = %q", got)
 	}
 
 	// Attempting to block A by B now would be a cycle; confirm the UI surfaces the error.
