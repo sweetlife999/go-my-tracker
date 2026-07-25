@@ -70,6 +70,35 @@ func TestIsReady(t *testing.T) {
 	}
 }
 
+func TestRemoveDependency_RemovesEdge(t *testing.T) {
+	a := mustTask(t, "a", "A")
+	b := mustTask(t, "b", "B")
+	g := NewGraph([]*Task{a, b})
+	must(t, g.AddDependency("b", "a")) // b blocked by a
+
+	g.RemoveDependency("b", "a")
+
+	if len(b.BlockedBy) != 0 {
+		t.Fatalf("expected b to have no blockers after removal, got %v", b.BlockedBy)
+	}
+	if !g.IsReady("b") {
+		t.Fatal("b should be ready once its only blocker is removed")
+	}
+}
+
+func TestRemoveDependency_NoopWhenAbsent(t *testing.T) {
+	a := mustTask(t, "a", "A")
+	b := mustTask(t, "b", "B")
+	g := NewGraph([]*Task{a, b})
+
+	g.RemoveDependency("b", "a") // no edge exists
+	g.RemoveDependency("missing", "a")
+
+	if len(b.BlockedBy) != 0 {
+		t.Fatalf("expected no blockers, got %v", b.BlockedBy)
+	}
+}
+
 func TestReadyTasks(t *testing.T) {
 	a := mustTask(t, "a", "A")
 	b := mustTask(t, "b", "B")

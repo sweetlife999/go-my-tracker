@@ -1,4 +1,4 @@
-.PHONY: build test vet fmt run-tui clean
+.PHONY: build test vet fmt run-tui run-mobile clean
 
 build:
 	go build ./...
@@ -14,6 +14,9 @@ fmt:
 
 run-tui:
 	go run ./tui
+
+run-mobile:
+	go run ./mobile
 
 clean:
 	rm -f tasktracker

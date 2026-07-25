@@ -48,6 +48,22 @@ func (g *Graph) AddDependency(task, blocker TaskID) error {
 	return nil
 }
 
+// RemoveDependency removes the edge recording that task is blocked by
+// blocker, if present. It is a no-op if the edge doesn't exist or either
+// task is unknown.
+func (g *Graph) RemoveDependency(task, blocker TaskID) {
+	t, ok := g.tasks[task]
+	if !ok {
+		return
+	}
+	for i, existing := range t.BlockedBy {
+		if existing == blocker {
+			t.BlockedBy = append(t.BlockedBy[:i], t.BlockedBy[i+1:]...)
+			return
+		}
+	}
+}
+
 // reaches reports whether a DFS from `from` can reach `to` via BlockedBy edges.
 func (g *Graph) reaches(from, to TaskID) bool {
 	visited := make(map[TaskID]bool)

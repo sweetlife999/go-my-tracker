@@ -72,6 +72,34 @@ func TestStore_AddDependency_PersistsAndRejectsCycles(t *testing.T) {
 	}
 }
 
+func TestStore_RemoveDependency_PersistsRemoval(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	must(t, s.SaveTask(ctx, mustTask(t, "a", "A")))
+	must(t, s.SaveTask(ctx, mustTask(t, "b", "B")))
+	must(t, s.AddDependency(ctx, "b", "a")) // b blocked by a
+
+	must(t, s.RemoveDependency(ctx, "b", "a"))
+
+	tasks, err := s.ListTasks(ctx)
+	if err != nil {
+		t.Fatalf("ListTasks: %v", err)
+	}
+	var b *Task
+	for _, tk := range tasks {
+		if tk.ID == "b" {
+			b = tk
+		}
+	}
+	if b == nil || len(b.BlockedBy) != 0 {
+		t.Fatalf("expected b to have no blockers after removal, got %+v", b)
+	}
+
+	// Removing again is a no-op, not an error.
+	must(t, s.RemoveDependency(ctx, "b", "a"))
+}
+
 func TestStore_ReadyTasks(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(t)

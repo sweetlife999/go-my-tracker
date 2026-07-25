@@ -223,6 +223,16 @@ func (s *Store) AddDependency(ctx context.Context, task, blocker TaskID) error {
 	return nil
 }
 
+// RemoveDependency deletes the edge recording that task is blocked by
+// blocker, if present.
+func (s *Store) RemoveDependency(ctx context.Context, task, blocker TaskID) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM task_dependencies WHERE task_id = ? AND blocker_id = ?`, string(task), string(blocker))
+	if err != nil {
+		return fmt.Errorf("core: remove dependency %q -> %q: %w", task, blocker, err)
+	}
+	return nil
+}
+
 // ReadyTasks returns the not-done tasks whose blockers are all done.
 func (s *Store) ReadyTasks(ctx context.Context) ([]*Task, error) {
 	tasks, err := s.ListTasks(ctx)
